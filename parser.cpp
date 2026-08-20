@@ -18,12 +18,12 @@ struct parseError {
     int line;
 };
 
+// === EXPRESSIONS === //
 struct NumberLit;
 struct Ident;
 struct BinaryOp;
 struct UnaryOp;
 
-// ptr ast
 using Expr = variant<NumberLit, Ident, BinaryOp, UnaryOp>;
 using ExprPtr = unique_ptr<Expr>;
 
@@ -32,6 +32,20 @@ struct Ident     { string name; };
 struct BinaryOp  { TokenType op; ExprPtr left; ExprPtr right; };
 struct UnaryOp {TokenType op; ExprPtr operand;};
 
+// === STATEMENT === //
+struct PrintStmt;
+struct ExprStmt;
+struct AsgnStmt;
+// add more later 
+
+using Stmt = variant<PrintStmt, ExprStmt, AsgnStmt>;
+using StmtPtr = unique_ptr<Stmt>;
+
+struct PrintStmt {ExprPtr value; };
+struct ExprStmt {ExprPtr value; };
+struct AsgnStmt {string name; ExprPtr value; };
+
+// ====== Debug Start ====== //
 template<class... Ts> struct overloaded : Ts... { using Ts::operator()...; };
 template<class... Ts> overloaded(Ts...) -> overloaded<Ts...>;
 
@@ -57,6 +71,27 @@ void printExpr(const ExprPtr& e, int depth = 0) {
     }, *e);
 }
 
+void printStmt(const StmtPtr& s, int depth = 0) {
+    // for debug
+    if (!s) { cout << string(depth * 2, ' ') << "null\n"; return; }
+    visit(overloaded{
+        [&](const PrintStmt& p) {
+            cout << string(depth * 2, ' ') << "PrintStmt\n";
+            printExpr(p.value, depth + 1);
+        },
+        [&](const ExprStmt& e) {
+            cout << string(depth * 2, ' ') << "ExprStmt\n";
+            printExpr(e.value, depth + 1);
+        },
+        [&](const AsgnStmt& a) {
+            cout << string(depth * 2, ' ') << "AsgnStmt(" << a.name << ")\n";
+            printExpr(a.value, depth + 1);
+        }
+    }, *s);
+}
+// ====== Debug End ====== //
+
+
 class Parser {
 public:
     Parser(vector<Token> tokens) {
@@ -65,9 +100,16 @@ public:
 
     ExprPtr parseExpression() { return expression(); }
 
-    // vector<StmtPtr> parse() {
-        // TODO
-    // }
+    vector<StmtPtr> parse() {
+        vector<StmtPtr> result;
+
+        while (peek(position_).type != TokenType::END_OF_FILE) {
+            result.push_back(statement());
+        }
+        return result;
+    }
+
+    const vector<parseError>& getErrors() { return errorList; }
 private:
     // primitives (mirror the lexer's peek/advance/validPos)
     Token peek(size_t pos){
@@ -96,11 +138,46 @@ private:
             return nullopt;
         }
     } 
-    
+    StmtPtr identStatement() {
+        if (peek(position_ + 1).type == TokenType::EQUALS) {
+            return assignStatement();
+        } else {
+            auto value = expression();
+            expect(TokenType::NEWLINE, "Expected Newline");
+            return make_unique<Stmt>(ExprStmt{std::move(value)});
+        }
+    }
     // one method per grammar rule above
-    // StmtPtr statement();
-    // StmtPtr printStatement();
-    // StmtPtr assignStatement();
+    StmtPtr statement(){
+        Token currToken = peek(position_);
+        TokenType currType = currToken.type;
+
+        if (currType == TokenType::PRINT) {
+            return printStatement();
+        } else if (currType == TokenType::IDENT) {
+            return identStatement();
+        } else {
+            auto value = expression();
+            expect(TokenType::NEWLINE, "Expected Newline");
+            return make_unique<Stmt>(ExprStmt{std::move(value)});
+        }
+    }
+    StmtPtr printStatement() {
+        expect(TokenType::PRINT, "Expected 'print'");
+        expect(TokenType::LPAREN, "Expected '(' after print");
+        auto value = expression();
+        expect(TokenType::RPAREN, "Expected ')'");
+        expect(TokenType::NEWLINE, "Expected Newline");
+        return make_unique<Stmt>(PrintStmt{std::move(value)});
+    }
+    StmtPtr assignStatement() {
+        string name = peek(position_).lexeme;
+        advance();
+        expect(TokenType::EQUALS, "Expected equals");
+        auto value = expression();
+        expect(TokenType::NEWLINE, "Expected Newline");
+        return make_unique<Stmt>(AsgnStmt{name, std::move(value)}); 
+    }
     ExprPtr expression(){
         // for continous addition and subtraction
         auto result = term();
@@ -161,14 +238,21 @@ private:
 };
 
 int main() {
-    Lexer myLexer("(1 + 2) * 3\n");
+    Lexer myLexer("x = 5\nprint(x)\nprint(x + 1)\n");
     vector<Token> myTokens = myLexer.tokenize();
     for (const Token& t : myTokens) {
         cout << static_cast<int>(t.type) << " " << t.lexeme << "\n";
     }
 
     Parser myParser(myTokens);
-    ExprPtr tree = myParser.parseExpression();
+    vector<StmtPtr> tree = myParser.parse();
+
     cout << "\n--- AST ---\n";
-    printExpr(tree);
+    for (const StmtPtr& s : tree) {
+        printStmt(s);
+    }
+
+    for (const parseError& err : myParser.getErrors()) {
+        cout << "[" << err.type << "] line " << err.line << ": " << err.message << "\n";
+    }
 }
