@@ -11,7 +11,7 @@
  Roadmap
  
       1. Lexer (working proto)
-      2. Parser (partial implementation)
+      2. Parser (working proto)
       3. Variables & static types
       4. Control flow (if/while/for)
       5. Functions

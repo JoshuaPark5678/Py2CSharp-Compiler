@@ -1,4 +1,4 @@
-/*
+*
 * The Parser. Given a list of tokens, convert it into an AST.
 */
 #include "lexer.cpp"
@@ -252,6 +252,10 @@ int main() {
         printStmt(s);
     }
 
+    // ERROR HANDLE
+    for (const lexError& err : myLexer.getErrors()){
+        cout << "[" << err.type << "] line " << err.line << ": " << err.message << "\n";
+    }
     for (const parseError& err : myParser.getErrors()) {
         cout << "[" << err.type << "] line " << err.line << ": " << err.message << "\n";
     }
