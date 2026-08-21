@@ -12,12 +12,12 @@
 using namespace std;
 
 enum class TokenType {
-    NUMBER, IDENT, PLUS, MINUS, STAR, SLASH,
+    NUMBER, IDENT, BOOL, PLUS, MINUS, STAR, SLASH,
     MOD, EQUALS, COMMA, COLON, GREATER, LESS, 
     GREATER_EQUAL, LESS_EQUAL, EQUAL_EQUAL, NOT_EQUAL, 
     PLUS_EQUAL, MINUS_EQUAL, STAR_EQUAL, SLASH_EQUAL, 
     MOD_EQUAL, LPAREN, RPAREN, 
-    PRINT, IF, WHILE, FOR, IN, RANGE, 
+    PRINT, IF, ELIF, ELSE, WHILE, FOR, IN, RANGE, 
     DEF, RETURN, ARROW,
     AND, OR, NOT,
     STRING, NEWLINE, 
@@ -103,6 +103,8 @@ private:
     unordered_map<string, TokenType> keywords = {
         {"print", TokenType::PRINT},
         {"if", TokenType::IF},
+        {"elif", TokenType::ELIF},
+        {"else", TokenType::ELSE},
         {"while", TokenType::WHILE},
         {"for", TokenType::FOR},
         {"in", TokenType::IN},
@@ -112,6 +114,8 @@ private:
         {"not", TokenType::NOT},
         {"def", TokenType::DEF},
         {"return", TokenType::RETURN},
+        {"True", TokenType::BOOL},
+        {"False", TokenType::BOOL},
     };
 
     char peek(size_t pos) {
@@ -208,8 +212,7 @@ private:
             type = TokenType::NEWLINE;
             line_++;
             isStartLine_ = true;
-            text = "Newline";
-        }
+            text = "Newline"; }
         // VARIABLES
         else if (isalpha(snippet) || snippet == '_') {
             type = TokenType::IDENT; 

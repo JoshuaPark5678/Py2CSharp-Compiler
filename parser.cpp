@@ -2,7 +2,6 @@
 * The Parser. Given a list of tokens, convert it into an AST.
 */
 #include "lexer.cpp"
-#include <cstddef>
 #include <iostream>
 #include <vector>
 #include <string>
@@ -23,27 +22,37 @@ struct NumberLit;
 struct Ident;
 struct BinaryOp;
 struct UnaryOp;
+struct StringLit;
+struct BoolLit;
 
-using Expr = variant<NumberLit, Ident, BinaryOp, UnaryOp>;
+using Expr = variant<NumberLit, Ident, BinaryOp, UnaryOp, StringLit, BoolLit>;
 using ExprPtr = unique_ptr<Expr>;
 
 struct NumberLit { double value; };
 struct Ident     { string name; };
 struct BinaryOp  { TokenType op; ExprPtr left; ExprPtr right; };
 struct UnaryOp {TokenType op; ExprPtr operand;};
+struct StringLit {string value; };
+struct BoolLit {bool value;};
 
 // === STATEMENT === //
 struct PrintStmt;
 struct ExprStmt;
 struct AsgnStmt;
+struct IfStmt;
+struct WhileStmt;
+struct ForStmt;
 // add more later 
 
-using Stmt = variant<PrintStmt, ExprStmt, AsgnStmt>;
+using Stmt = variant<PrintStmt, ExprStmt, AsgnStmt, IfStmt, WhileStmt>;
 using StmtPtr = unique_ptr<Stmt>;
 
 struct PrintStmt {ExprPtr value; };
 struct ExprStmt {ExprPtr value; };
 struct AsgnStmt {string name; ExprPtr value; };
+struct IfStmt {ExprPtr condition; vector<StmtPtr> thenBranches; vector<StmtPtr> elseBranches;};
+struct WhileStmt {ExprPtr condition; vector<StmtPtr> body;};
+// For stmt TBD
 
 // ====== Debug Start ====== //
 template<class... Ts> struct overloaded : Ts... { using Ts::operator()...; };
@@ -67,6 +76,12 @@ void printExpr(const ExprPtr& e, int depth = 0) {
         [&](const UnaryOp& u) {
             cout << string(depth * 2, ' ') << "UnaryOp(" << static_cast<int>(u.op) << ")\n";
             printExpr(u.operand, depth + 1);
+        },
+        [&](const StringLit& s) {
+            cout << string(depth * 2, ' ') << "StringLit(" << s.value << ")\n";
+        },
+        [&](const BoolLit& b) {
+            cout << string(depth * 2, ' ') << "BoolLit(" << (b.value ? "true" : "false") << ")\n";
         }
     }, *e);
 }
@@ -86,6 +101,27 @@ void printStmt(const StmtPtr& s, int depth = 0) {
         [&](const AsgnStmt& a) {
             cout << string(depth * 2, ' ') << "AsgnStmt(" << a.name << ")\n";
             printExpr(a.value, depth + 1);
+        },
+        [&](const IfStmt& i) {
+            cout << string(depth * 2, ' ') << "IfStmt\n";
+            printExpr(i.condition, depth + 1);
+            cout << string((depth + 1) * 2, ' ') << "Then:\n";
+            for (const StmtPtr& stmt : i.thenBranches) {
+                printStmt(stmt, depth + 2);
+            }
+            if (!i.elseBranches.empty()) {
+                cout << string((depth + 1) * 2, ' ') << "Else:\n";
+                for (const StmtPtr& stmt : i.elseBranches) {
+                    printStmt(stmt, depth + 2);
+                }
+            }
+        },
+        [&](const WhileStmt& w) {
+            cout << string(depth * 2, ' ') << "WhileStmt\n";
+            printExpr(w.condition, depth + 1);
+            for (const StmtPtr& stmt : w.body) {
+                printStmt(stmt, depth + 1);
+            }
         }
     }, *s);
 }
@@ -147,7 +183,18 @@ private:
             return make_unique<Stmt>(ExprStmt{std::move(value)});
         }
     }
-    // one method per grammar rule above
+
+    vector<StmtPtr> block() {
+        expect(TokenType::INDENT, "Expected Indent");
+        vector<StmtPtr> result;
+
+        while (peek(position_).type != TokenType::DEDENT && peek(position_).type != TokenType::END_OF_FILE) { 
+            result.push_back(statement());
+        }
+        expect(TokenType::DEDENT, "Expected Dedent");
+        return result;
+    }
+
     StmtPtr statement(){
         Token currToken = peek(position_);
         TokenType currType = currToken.type;
@@ -156,6 +203,8 @@ private:
             return printStatement();
         } else if (currType == TokenType::IDENT) {
             return identStatement();
+        } else if (currType == TokenType::IF) {
+            return ifStatement();
         } else {
             auto value = expression();
             expect(TokenType::NEWLINE, "Expected Newline");
@@ -177,43 +226,95 @@ private:
         auto value = expression();
         expect(TokenType::NEWLINE, "Expected Newline");
         return make_unique<Stmt>(AsgnStmt{name, std::move(value)}); 
+    } 
+    StmtPtr ifStatement() {
+        vector<StmtPtr> emptyVector;
+        advance(); // Could be IF or ELIF
+        auto condition = expression();
+        expect(TokenType::COLON, "Expected Colon");
+        if (peek(position_).type == TokenType::NEWLINE) {
+            expect(TokenType::NEWLINE, "Expected Newline");
+            vector<StmtPtr> thenBlock = block();
+            if (peek(position_).type == TokenType::ELIF) {
+                vector<StmtPtr> elifBlock;
+                elifBlock.push_back(ifStatement());
+                return make_unique<Stmt>(IfStmt{std::move(condition), std::move(thenBlock), std::move(elifBlock)});
+            } else if (peek(position_).type == TokenType::ELSE) {
+                expect(TokenType::ELSE, "Expected 'else'");
+                expect(TokenType::COLON, "Expected Colon");
+                expect(TokenType::NEWLINE, "Expected Newline"); 
+                return make_unique<Stmt>(IfStmt{std::move(condition), std::move(thenBlock), block()});
+            } else {
+                return make_unique<Stmt>(IfStmt{std::move(condition), std::move(thenBlock), std::move(emptyVector)});
+            }
+        }
+        vector<StmtPtr> inlineBlock;
+        inlineBlock.push_back(statement()); 
+        return make_unique<Stmt>(IfStmt{std::move(condition), std::move(inlineBlock), std::move(emptyVector)});
     }
-    ExprPtr expression(){
+
+    ExprPtr expression() {
+        return logicalOperators();
+    }
+    ExprPtr logicalOperators() {
+        // for continous multiplication and division
+        auto result = comparativeOperators();
+        while (check(TokenType::AND) || check(TokenType::OR) || check(TokenType::NOT)) {
+            TokenType op = peek(position_).type;
+            advance();
+            auto right = comparativeOperators();
+            result = make_unique<Expr>(BinaryOp{op, std::move(result), std::move(right)});
+        }        
+        return result;
+    }
+    ExprPtr comparativeOperators() {
+        // for equalities and comparison
+        auto result = additiveOperators();
+        while (check(TokenType::GREATER) || check(TokenType::LESS)
+        || check(TokenType::GREATER_EQUAL) || check(TokenType::LESS_EQUAL)
+        || check(TokenType::EQUAL_EQUAL) || check(TokenType::NOT_EQUAL)) {
+            TokenType op = peek(position_).type;
+            advance();
+            auto right = additiveOperators();
+            result = make_unique<Expr>(BinaryOp{op, std::move(result), std::move(right)});
+        }        
+        return result;
+    }
+    ExprPtr additiveOperators(){
         // for continous addition and subtraction
-        auto result = term();
+        auto result = multiplicativeOperators();
         while (check(TokenType::PLUS) || check(TokenType::MINUS)) {
             TokenType op = peek(position_).type;
             advance();
-            auto right = term();
+            auto right = multiplicativeOperators();
             result = make_unique<Expr>(BinaryOp{op, std::move(result), std::move(right)});
         }        
         return result;
-
-
     }
-    ExprPtr term() {
+    ExprPtr multiplicativeOperators() {
         // for continous multiplication and division
-        auto result = factor();
-        while (check(TokenType::STAR) || check(TokenType::SLASH)) {
+        auto result = unary();
+        while (check(TokenType::STAR) || check(TokenType::SLASH) || check(TokenType::MOD)) {
             TokenType op = peek(position_).type;
             advance();
-            auto right = factor();
+            auto right = unary();
             result = make_unique<Expr>(BinaryOp{op, std::move(result), std::move(right)});
         }        
         return result;
     }
-    ExprPtr factor() {
-        // for the levels of parenthesis'
-
+    ExprPtr unary() {
         Token currToken = peek(position_);
         TokenType currType = currToken.type;
-        if (currType == TokenType::NUMBER){
+        if (currType == TokenType::PLUS || currType == TokenType::MINUS){
             advance();
-            return make_unique<Expr>(NumberLit{stod(currToken.lexeme)});
-        } else if (currType == TokenType::IDENT) {
-            advance();
-            return make_unique<Expr>(Ident{currToken.lexeme});
-        } else if (currType == TokenType::LPAREN) {
+            return make_unique<Expr>(UnaryOp{currType, unary()});
+        }
+        return primary();
+    }
+    ExprPtr primary() {
+        Token currToken = peek(position_);
+        TokenType currType = currToken.type;
+        if (currType == TokenType::LPAREN) {
             // Decent
             advance();
             auto inner = expression();
@@ -224,12 +325,23 @@ private:
                 // Missing RPAREN
                 return nullptr;
             }
-        } else if (currType == TokenType::PLUS || currType == TokenType::MINUS){
+        } else if (currType == TokenType::NUMBER){
             advance();
-            return make_unique<Expr>(UnaryOp{currType, factor()});
-        } else {
-            return nullptr;
+            return make_unique<Expr>(NumberLit{stod(currToken.lexeme)});
+        } else if (currType == TokenType::IDENT) {
+            advance();
+            return make_unique<Expr>(Ident{currToken.lexeme});
+        } else if (currType == TokenType::STRING) {
+            advance();
+            return make_unique<Expr>(StringLit{currToken.lexeme});
+        } else if (currType == TokenType::BOOL) {
+            advance();
+            if (currToken.lexeme == "True"){
+                return make_unique<Expr>(BoolLit{true});
+            }
+            return make_unique<Expr>(BoolLit{false});
         }
+        return nullptr;
     }
 
     vector<Token> tokens_;
@@ -238,7 +350,7 @@ private:
 };
 
 int main() {
-    Lexer myLexer("x = 5\nprint(x)\nprint(x + 1)\n");
+    Lexer myLexer("if x:\n    print(1)\nelif y:\n    print(2)\nelse:\n    print(3)\nif z: print(9)\n");
     vector<Token> myTokens = myLexer.tokenize();
     for (const Token& t : myTokens) {
         cout << static_cast<int>(t.type) << " " << t.lexeme << "\n";
