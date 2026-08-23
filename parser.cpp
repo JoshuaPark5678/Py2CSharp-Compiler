@@ -1,4 +1,4 @@
-*
+/*
 * The Parser. Given a list of tokens, convert it into an AST.
 */
 #include "lexer.cpp"
