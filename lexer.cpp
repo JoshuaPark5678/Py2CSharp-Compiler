@@ -1,4 +1,4 @@
-*
+/*
  *
  * The Lexer. Given an arithmatic python line, return a tokenized version. 
  *
@@ -12,7 +12,7 @@
 using namespace std;
 
 enum class TokenType {
-    NUMBER, IDENT, BOOL, PLUS, MINUS, STAR, SLASH,
+    INT, FLOAT, IDENT, BOOL, PLUS, MINUS, STAR, SLASH,
     MOD, EQUALS, COMMA, COLON, GREATER, LESS, 
     GREATER_EQUAL, LESS_EQUAL, EQUAL_EQUAL, NOT_EQUAL, 
     PLUS_EQUAL, MINUS_EQUAL, STAR_EQUAL, SLASH_EQUAL, 
@@ -262,7 +262,7 @@ private:
         }
         // NUMBERS
         else if (isdigit(snippet) || snippet == '.') {
-            type = TokenType::NUMBER; 
+            type = TokenType::INT; 
             text.push_back(snippet);
             bool isFloat = snippet == '.'; 
 
@@ -272,6 +272,9 @@ private:
                 } 
                 text.push_back((peek(position_ + step)));
                 step++;
+            }
+            if (isFloat) {
+                type = TokenType::FLOAT;
             }
         }
         // STRING LITERAL
@@ -317,4 +320,4 @@ private:
 //         cout << static_cast<int>(t.type) << " " << t.lexeme << "\n";
 //     }
 //
-//
+// }
