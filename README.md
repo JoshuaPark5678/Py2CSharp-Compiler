@@ -10,9 +10,13 @@
 
  Roadmap
  
-      1. Lexer (working proto)
-      2. Parser (working proto)
-      3. Variables & static types (static types will be delayed)
-      4. Control flow (if/while/for) (implemented)
+      1. Lexer (Done)
+      2. Parser (Done)
+      3. Variables & static types (Done, No static types...)
+      4. Control flow (if/while/for) (Done)
       5. Code Generation to c# (Done, working mvp)
-      6. Functions 
+      6. Functions
+      7. Compile c# via .net
+      8. More Data structures (lists, dicts, sets ...)
+      
+      
