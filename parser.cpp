@@ -17,6 +17,10 @@ struct parseError {
     int line;
 };
 
+// forward dec for code gen
+class ExprVisitor;
+class StmtVisitor;
+
 // === EXPRESSIONS === //
 struct IntLit;
 struct FloatLit;
@@ -30,14 +34,14 @@ struct CallExpr;
 using Expr = variant<IntLit, FloatLit, Ident, BinaryOp, UnaryOp, StringLit, BoolLit, CallExpr>;
 using ExprPtr = unique_ptr<Expr>;
 
-struct IntLit {int value;};
-struct FloatLit { double value; };
-struct Ident     { string name; };
-struct BinaryOp  { TokenType op; ExprPtr left; ExprPtr right; };
-struct UnaryOp {TokenType op; ExprPtr operand;};
-struct StringLit {string value; };
-struct BoolLit {bool value;};
-struct CallExpr {string callee; vector<ExprPtr> args; };
+struct IntLit {int value; string accept(ExprVisitor& v) const;};
+struct FloatLit { double value; string accept(ExprVisitor& v) const;};
+struct Ident     { string name; string accept(ExprVisitor& v) const;};
+struct BinaryOp  { TokenType op; ExprPtr left; ExprPtr right; string accept(ExprVisitor& v) const;};
+struct UnaryOp {TokenType op; ExprPtr operand; string accept(ExprVisitor& v) const;};
+struct StringLit {string value; string accept(ExprVisitor& v) const;};
+struct BoolLit {bool value; string accept(ExprVisitor& v) const;};
+struct CallExpr {string callee; vector<ExprPtr> args; string accept(ExprVisitor& v) const;};
 
 // === STATEMENT === //
 struct PrintStmt;
@@ -51,12 +55,12 @@ struct ForStmt;
 using Stmt = variant<PrintStmt, ExprStmt, AsgnStmt, IfStmt, WhileStmt, ForStmt>;
 using StmtPtr = unique_ptr<Stmt>;
 
-struct PrintStmt {ExprPtr value; };
-struct ExprStmt {ExprPtr value; };
-struct AsgnStmt {string name; ExprPtr value; TokenType op;};
-struct IfStmt {ExprPtr condition; vector<StmtPtr> thenBranches; vector<StmtPtr> elseBranches;};
-struct WhileStmt {ExprPtr condition; vector<StmtPtr> body;};
-struct ForStmt {string varName; ExprPtr iterable; vector<StmtPtr> body; };
+struct PrintStmt {ExprPtr value;  string accept(StmtVisitor& v) const;};
+struct ExprStmt {ExprPtr value; string accept(StmtVisitor& v) const;};
+struct AsgnStmt {string name; ExprPtr value; TokenType op; string accept(StmtVisitor& v) const;};
+struct IfStmt {ExprPtr condition; vector<StmtPtr> thenBranches; vector<StmtPtr> elseBranches; string accept(StmtVisitor& v) const;};
+struct WhileStmt {ExprPtr condition; vector<StmtPtr> body; string accept(StmtVisitor& v) const;};
+struct ForStmt {string varName; ExprPtr iterable; vector<StmtPtr> body; string accept(StmtVisitor& v) const;};
 // For stmt TBD
 
 // DEBUG
@@ -73,8 +77,13 @@ public:
     vector<StmtPtr> parse() {
         vector<StmtPtr> result;
 
-        while (peek(position_).type != TokenType::END_OF_FILE) {
-            result.push_back(statement());
+        while (true) {
+            auto stmt = statement();
+            if (stmt) {
+                result.push_back(std::move(stmt));
+            } else {
+                break;
+            }
         }
         return result;
     }
@@ -114,8 +123,13 @@ private:
         expect(TokenType::INDENT, "Expected Indent");
         vector<StmtPtr> result;
 
-        while (peek(position_).type != TokenType::DEDENT && peek(position_).type != TokenType::END_OF_FILE) { 
-            result.push_back(statement());
+        while (peek(position_).type != TokenType::DEDENT){ 
+            auto stmt = statement();
+            if (stmt) {
+                result.push_back(std::move(stmt));
+            } else {
+                break;
+            }
         }
         expect(TokenType::DEDENT, "Expected Dedent");
         return result;
@@ -124,8 +138,12 @@ private:
     StmtPtr statement(){
         Token currToken = peek(position_);
         TokenType currType = currToken.type;
-
-        if (currType == TokenType::PRINT) {
+        if (currType == TokenType::NEWLINE){
+            expect(TokenType::NEWLINE, "Expected Newline");
+            return statement();
+        } else if (currType == TokenType::END_OF_FILE) {
+            return nullptr;
+        }else if (currType == TokenType::PRINT) {
             return printStatement();
         } else if (currType == TokenType::IDENT) {
             return identStatement();
@@ -137,10 +155,13 @@ private:
             return forStatement();
         } else {
             auto value = expression();
-            expect(TokenType::NEWLINE, "Expected Newline");
+            if (peek(position_).type != TokenType::END_OF_FILE) {
+                expect(TokenType::NEWLINE, "Expected Newline");
+            }
             return make_unique<Stmt>(ExprStmt{std::move(value)});
         }
     }
+
     StmtPtr printStatement() {
         expect(TokenType::PRINT, "Expected 'print'");
         expect(TokenType::LPAREN, "Expected '(' after print");
@@ -217,21 +238,36 @@ private:
     }
 
     ExprPtr expression() {
-        return logicalOperators();
+        return orOperators();
     }
-    ExprPtr logicalOperators() {
-        // for continous multiplication and division
+    ExprPtr orOperators() {
+        auto result = andOperators();
+        while (check(TokenType::OR)) {
+            TokenType op = peek(position_).type;
+            advance();
+            auto right = andOperators();
+            result = make_unique<Expr>(BinaryOp{op, std::move(result), std::move(right)});
+        }
+        return result;
+    }
+    ExprPtr andOperators() {
         auto result = comparativeOperators();
-        while (check(TokenType::AND) || check(TokenType::OR)) {
+        while (check(TokenType::AND)) {
             TokenType op = peek(position_).type;
             advance();
             auto right = comparativeOperators();
             result = make_unique<Expr>(BinaryOp{op, std::move(result), std::move(right)});
-        }        
+        }
         return result;
     }
+    ExprPtr notOperators() {
+        if (check(TokenType::NOT)) {
+            advance();
+            return make_unique<Expr>(UnaryOp{TokenType::NOT, notOperators()});
+        }
+        return comparativeOperators();
+    }
     ExprPtr comparativeOperators() {
-        // for equalities and comparison
         auto result = additiveOperators();
         while (check(TokenType::GREATER) || check(TokenType::LESS)
         || check(TokenType::GREATER_EQUAL) || check(TokenType::LESS_EQUAL)
@@ -240,11 +276,10 @@ private:
             advance();
             auto right = additiveOperators();
             result = make_unique<Expr>(BinaryOp{op, std::move(result), std::move(right)});
-        }        
+        }
         return result;
     }
     ExprPtr additiveOperators(){
-        // for continous addition and subtraction
         auto result = multiplicativeOperators();
         while (check(TokenType::PLUS) || check(TokenType::MINUS)) {
             TokenType op = peek(position_).type;
@@ -255,7 +290,6 @@ private:
         return result;
     }
     ExprPtr multiplicativeOperators() {
-        // for continous multiplication and division
         auto result = unary();
         while (check(TokenType::STAR) || check(TokenType::SLASH) || check(TokenType::MOD)) {
             TokenType op = peek(position_).type;
@@ -268,7 +302,7 @@ private:
     ExprPtr unary() {
         Token currToken = peek(position_);
         TokenType currType = currToken.type;
-        if (currType == TokenType::PLUS || currType == TokenType::MINUS || currType == TokenType::NOT){
+        if (currType == TokenType::PLUS || currType == TokenType::MINUS) {
             advance();
             return make_unique<Expr>(UnaryOp{currType, unary()});
         }
@@ -310,15 +344,18 @@ private:
             vector<ExprPtr> args;
             advance();
             expect(TokenType::LPAREN, "Expected LPAREN");
-            while (peek(position_ + 1).type == TokenType::COMMA) {
-                args.push_back(expression());
+            auto next = expression();
+            while (peek(position_).type == TokenType::COMMA) {
+                args.push_back(std::move(next));
                 advance();
+                next = expression();
             }
-            args.push_back(expression());
+            args.push_back(std::move(next));
             expect(TokenType::RPAREN, "Expected RPAREN");
             return make_unique<Expr>(CallExpr{"range", std::move(args)});
         }
         advance();
+        errorList.push_back(parseError{"UNKNOWN TOKEN", "parser received an unknown token", currToken.line});
         return nullptr;
     }
 
@@ -327,26 +364,26 @@ private:
     vector<parseError> errorList = {};  
 };
 
-int main() {
-    Lexer myLexer("x = 1\nfor i in range(2, 6, 2):\n    x += 1\n");
-    vector<Token> myTokens = myLexer.tokenize();
-    for (const Token& t : myTokens) {
-        cout << static_cast<int>(t.type) << " " << t.lexeme << "\n";
-    }
-
-    Parser myParser(myTokens);
-    vector<StmtPtr> tree = myParser.parse();
-
-    cout << "\n--- AST ---\n";
-    for (const StmtPtr& s : tree) {
-        printStmt(s);
-    }
-
-    // ERROR HANDLE
-    for (const lexError& err : myLexer.getErrors()){
-        cout << "[" << err.type << "] line " << err.line << ": " << err.message << "\n";
-    }
-    for (const parseError& err : myParser.getErrors()) {
-        cout << "[" << err.type << "] line " << err.line << ": " << err.message << "\n";
-    }
-}
+// int main() {
+//     Lexer myLexer("x = 1\nfor i in range(2, 6, 2):\n    x += 1\n");
+//     vector<Token> myTokens = myLexer.tokenize();
+//     for (const Token& t : myTokens) {
+//         cout << static_cast<int>(t.type) << " " << t.lexeme << "\n";
+//     }
+//
+//     Parser myParser(myTokens);
+//     vector<StmtPtr> tree = myParser.parse();
+//
+//     cout << "\n--- AST ---\n";
+//     for (const StmtPtr& s : tree) {
+//         printStmt(s);
+//     }
+//
+//     // ERROR HANDLE
+//     for (const lexError& err : myLexer.getErrors()){
+//         cout << "[" << err.type << "] line " << err.line << ": " << err.message << "\n";
+//     }
+//     for (const parseError& err : myParser.getErrors()) {
+//         cout << "[" << err.type << "] line " << err.line << ": " << err.message << "\n";
+//     }
+// }
