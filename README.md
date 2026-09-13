@@ -1,6 +1,6 @@
- # Py2C# Compiler
+ # Py2C# Transpiler
 
- A from-scratch compiler that takes a restricted, statically-typeable subset of Python and compiles it to C#. Built in C++ with a lexer and parser (no `ast` module).
+ A from-scratch source-to-source compiler that takes a restricted, statically-typeable subset of Python and turns it into C#. Built in C++ with a lexer, parser (no `ast` module) and a c# code generator.
 
  ## Status
 
