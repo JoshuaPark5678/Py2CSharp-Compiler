@@ -7,7 +7,7 @@ if (x + 1 == y):
     print("hello world")
 
 for i in range(5):
-    print("number is: " + i)
+    print(i)
 
 myString = "Program is done!"
 
