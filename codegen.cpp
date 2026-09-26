@@ -6,10 +6,11 @@
 #include "parser.cpp"
 #include <set>
 #include <string>
-# include <variant>
+#include <variant>
 #include <vector>
 #include <fstream>
 #include <sstream>
+#include <cstdlib>
 using namespace std;
 
 class ExprVisitor {
@@ -59,10 +60,12 @@ public:
     }
 
     string generate() {
-        string output = "";
+        string output = "using System;\nclass Program {\n    static void Main() {\n";
         for (const StmtPtr& stmt : program_) {
-            output = output + genStmt(stmt);
+            output = output + std::string(indentationLevel*4, ' ') + genStmt(stmt);
         }
+        output = output + "    }\n}";
+
         return output;
     }
 
@@ -76,7 +79,9 @@ public:
     string visitBoolLit (const BoolLit& b) override {return b.value ? "true" : "false"; }
     string visitCallExpr(const CallExpr& c) override { return " Unused visit CallExpr " ;   }
 
-
+    string getIndent() {
+        return std::string(indentationLevel*4, ' ');
+    }
 
     // StmtVisitor
     string visitPrintStmt(const PrintStmt& p) override { return "Console.WriteLine(" + genExpr(p.value) + ");";}
@@ -88,34 +93,40 @@ public:
         return "dynamic " + a.name + " = " + genExpr(a.value) + ";";
     }
     string visitIfStmt(const IfStmt& i) override {
+        indentationLevel += 1;
         string thenBranches;
         for (const auto& stmt : i.thenBranches){
-            thenBranches.append("   " + genStmt(stmt));
+            thenBranches.append(getIndent() + genStmt(stmt));
         }
         if (i.elseBranches.empty()) {
-            return "if (" + genExpr(i.condition) + ") {\n" + thenBranches + "}\n";
+            indentationLevel -= 1;
+            return "if (" + genExpr(i.condition) + ") {\n" + thenBranches + getIndent() + "}\n";
         }
         string elseBranches;
         for (const auto& stmt : i.elseBranches){
-            elseBranches.append("   " + genStmt(stmt));
+            elseBranches.append(getIndent() + genStmt(stmt));
         }
-        return "if (" + genExpr(i.condition) + ") {\n" + thenBranches + "} else {\n" + elseBranches + "}\n";
+        indentationLevel -= 1;
+        return "if (" + genExpr(i.condition) + ") {\n" + thenBranches + "} else {\n" + elseBranches + getIndent() + "}\n";
     }
 
     string visitWhileStmt(const WhileStmt& w) override {
+        indentationLevel += 1;
         string body;
         for (const auto& stmt : w.body){
-            body.append("    " + genStmt(stmt));
+            body.append(getIndent() + genStmt(stmt));
         }
-
-        return "while (" + genExpr(w.condition) + ") {\n" + body + "}\n";
+        indentationLevel -= 1;
+        return "while (" + genExpr(w.condition) + ") {\n" + body + getIndent() +"}\n";
     }
 
     string visitForStmt(const ForStmt& f) override {
+        indentationLevel += 1;
         string body;
         for (const auto& stmt : f.body) {
-            body.append("   " + genStmt(stmt));
+            body.append(getIndent() + genStmt(stmt));
         }
+        indentationLevel -= 1;
         if (std::holds_alternative<CallExpr>(*f.iterable)) {
             const auto& iterable = std::get<CallExpr>(*f.iterable);
             if (iterable.callee == "range") {
@@ -137,7 +148,7 @@ public:
                 } else {
                     return " ERROR ";
                 }
-                return "for (int " + varName + " = " + start + "; " + varName + cond + "; " + varName + inc + ") {\n" + body + "}\n";
+                return "for (int " + varName + " = " + start + "; " + varName + cond + "; " + varName + inc + ") {\n" + body + getIndent() + "}\n";
             }
         }
         return " ERROR "; 
@@ -196,6 +207,7 @@ private:
         }
     }
     
+    int indentationLevel = 2;
     vector<StmtPtr> program_;
     set<string> declaredVars_;
 };
@@ -203,41 +215,71 @@ private:
 int main(int argc, char* argv[]) {
     if (argc < 2) return 1;
 
+    bool debug = false, run = false;
+    for (int i = 2; i < argc; ++i) {
+        std::string arg = argv[i];
+        if (arg == "debug") debug = true;
+        if (arg == "--run") run = true;
+    }
+
+    
     std::ifstream file(argv[1]);
     std::stringstream buffer;
     buffer << file.rdbuf();
-    std::string fileContent = buffer.str();
-
-    cout << "\n--- SOURCE ---\n";
-    std::cout << fileContent; 
+    std::string fileContent = buffer.str(); 
 
     Lexer myLexer(fileContent);
     vector<Token> myTokens = myLexer.tokenize();
 
-    for (const Token& t : myTokens) {
-        cout << static_cast<int>(t.type) << " " << t.lexeme << "\n";
-    }
-
     Parser myParser(myTokens);
     auto MyTree = myParser.parse();
 
-    cout << "\n--- AST ---\n";
-    for (const StmtPtr& s : MyTree) {
-        printStmt(s);
+    if (debug) {
+        cout << "\n--- SOURCE ---\n";
+        std::cout << fileContent;
+        
+        cout << "\n--- Tokens ---\n";
+        for (const Token& t : myTokens) {
+            cout << static_cast<int>(t.type) << " " << t.lexeme << "\n";
+        }
+
+        cout << "\n--- AST ---\n";
+        for (const StmtPtr& s : MyTree) {
+            printStmt(s);
+        }
     }
 
     CodeGenVisitor myCodeGenVisitor(MyTree);
     string output = myCodeGenVisitor.generate();
 
-    cout << "\n--- OUTPUT ---\n";
-    cout << output;
-    
-    // ERROR HANDLE
-    for (const lexError& err : myLexer.getErrors()){
-        cout << "[" << err.type << "] line " << err.line << ": " << err.message << "\n";
+    if (debug) {
+        cout << "\n--- OUTPUT ---\n";
+        cout << output;
+
+        // ERROR HANDLE
+        for (const lexError& err : myLexer.getErrors()){
+            cout << "[" << err.type << "] line " << err.line << ": " << err.message << "\n";
+        }
+        for (const parseError& err : myParser.getErrors()) {
+            cout << "[" << err.type << "] line " << err.line << ": " << err.message << "\n";
+        }
     }
-    for (const parseError& err : myParser.getErrors()) {
-        cout << "[" << err.type << "] line " << err.line << ": " << err.message << "\n";
+    
+    std::string csPath = run ? "/tmp/py2cs-run/Program.cs" : "Program.cs";
+    std::ofstream outputFile(csPath);
+    if (!outputFile.is_open()) {
+        std::cerr << "Error opening file!" << std::endl;
+        return 1;
+    }
+    outputFile << output;
+    outputFile.close();
+
+    if (run) {
+        int rc = std::system("dotnet run --project /tmp/py2cs-run");
+        if (rc != 0) {
+            std::cerr << "dotnet run failed with code " << rc << std::endl;
+            return 1;
+        }
     }
     return 0;
 }
